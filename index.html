@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>Site Manager</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #eee;
+    }
+    #home, #site-view {
+      width: 100vw;
+      height: 100vh;
+      box-sizing: border-box;
+      padding: 24px;
+    }
+    #home {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .top-actions {
+      display: flex;
+      gap: 16px;
+    }
+    .action-card {
+      flex: 1;
+      padding: 20px;
+      border-radius: 12px;
+      background: #1e1e1e;
+      border: 1px solid #333;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .action-card:hover {
+      background: #262626;
+    }
+    .action-title {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .action-desc {
+      font-size: 13px;
+      color: #aaa;
+    }
+    .list-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+    #items-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .item-card {
+      width: 260px;
+      padding: 14px;
+      border-radius: 10px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .item-name {
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .item-type {
+      font-size: 11px;
+      color: #999;
+    }
+    .item-actions {
+      display: flex;
+      gap: 8px;
+    }
+    button {
+      border-radius: 6px;
+      border: none;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      background: #3a3a3a;
+      color: #eee;
+    }
+    button:hover {
+      background: #4a4a4a;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: #111;
+      color: #eee;
+      font-size: 12px;
+      box-sizing: border-box;
+    }
+    /* モーダル */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    .modal {
+      width: 900px;
+      max-width: 95vw;
+      max-height: 90vh;
+      background: #1b1b1b;
+      border-radius: 12px;
+      border: 1px solid #444;
+      padding: 16px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .modal-body {
+      display: flex;
+      gap: 12px;
+      flex: 1;
+      min-height: 400px;
+    }
+    .modal-left {
+      flex: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .modal-right {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .field-label {
+      font-size: 12px;
+      color: #ccc;
+    }
+    #editor-container {
+      flex: 1;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #333;
+    }
+    .code-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .code-tab {
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      background: #2a2a2a;
+      color: #ccc;
+    }
+    .code-tab.active {
+      background: #007acc;
+      color: #fff;
+    }
+    .clipboard-actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    #site-view {
+      position: relative;
+      background: #fff;
+      color: #000;
+      overflow: auto;
+    }
+    #esc-hint {
+      position: fixed;
+      top: 8px;
+      right: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.9);
+      color: #000;
+      font-size: 11px;
+      z-index: 100;
+    }
+  </style>
+  <!-- Monaco Editor CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+</head>
+<body>
+  <div id="home"></div>
+  <div id="site-view" style="display:none;"></div>
+  <div id="esc-hint" style="display:none;">Escキーでホームに戻る</div>
+
+  <input id="folder-input" type="file" webkitdirectory multiple style="display:none;" />
+
+  <script>
+    // ===== IndexedDB =====
+    const DB_NAME = 'siteManager';
+    const STORE_NAME = 'items';
+    let db;
+
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            const store = db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+            store.createIndex('type', 'type', { unique: false });
+          }
+        };
+        req.onsuccess = (e) => {
+          db = e.target.result;
+          resolve(db);
+        };
+        req.onerror = (e) => reject(e);
+      });
+    }
+
+    function getAllItems() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = (e) => reject(e);
+      });
+    }
+
+    function addItem(item) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.add(item);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = (e) => reject(e);
+      });
+    }
+
+    function updateItem(item) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.put(item);
+        req.onsuccess = () => resolve();
+        req.onerror = (e) => reject(e);
+      });
+    }
+
+    function getItem(id) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = (e) => reject(e);
+      });
+    }
+
+    // ===== 状態 =====
+    let items = [];
+    let monacoLoaded = false;
+    let editors = {
+      html: null,
+      css: null,
+      js: null
+    };
+    let currentTab = 'html';
+
+    // ===== 初期化 =====
+    (async function init() {
+      await openDB();
+      items = await getAllItems();
+      renderHome();
+      setupEscapeKey();
+      setupMonacoLoader();
+    })();
+
+    function setupEscapeKey() {
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          showHome();
+        }
+      });
+    }
+
+    function setupMonacoLoader() {
+      require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
+      require(['vs/editor/editor.main'], function () {
+        monacoLoaded = true;
+      });
+    }
+
+    // ===== ホーム画面 =====
+    function renderHome() {
+      const root = document.getElementById('home');
+      root.style.display = 'block';
+      const siteView = document.getElementById('site-view');
+      siteView.style.display = 'none';
+      document.getElementById('esc-hint').style.display = 'none';
+
+      root.innerHTML = '';
+
+      const top = document.createElement('div');
+      top.className = 'top-actions';
+
+      const cardCode = document.createElement('div');
+      cardCode.className = 'action-card';
+      cardCode.innerHTML = `
+        <div class="action-title">HTML/CSS/JSの追加</div>
+        <div class="action-desc">サイト内でコードを書いてIndexedDBに保存します。</div>
+      `;
+      cardCode.onclick = () => openCodeModal();
+
+      const cardFolder = document.createElement('div');
+      cardFolder.className = 'action-card';
+      cardFolder.innerHTML = `
+        <div class="action-title">フォルダをアップロード</div>
+        <div class="action-desc">フォルダをアップロードして、その中のファイルを適用して開きます。(IndexedDBにはパスのみ保存)</div>
+      `;
+      cardFolder.onclick = () => triggerFolderUpload();
+
+      top.appendChild(cardCode);
+      top.appendChild(cardFolder);
+
+      const listTitle = document.createElement('div');
+      listTitle.className = 'list-title';
+      listTitle.textContent = '保存されたサイト / フォルダ';
+
+      const list = document.createElement('div');
+      list.id = 'items-list';
+
+      items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'item-card';
+
+        const header = document.createElement('div');
+        header.className = 'item-header';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = item.name || '';
+        nameInput.className = 'item-name';
+        nameInput.onchange = async () => {
+          item.name = nameInput.value;
+          await updateItem(item);
+        };
+
+        const typeLabel = document.createElement('div');
+        typeLabel.className = 'item-type';
+        typeLabel.textContent = item.type === 'code' ? 'コードサイト' : 'フォルダサイト';
+
+        header.appendChild(nameInput);
+        header.appendChild(typeLabel);
+
+        const actions = document.createElement('div');
+        actions.className = 'item-actions';
+
+        const openBtn = document.createElement('button');
+        openBtn.textContent = '開く';
+        openBtn.onclick = () => openItem(item);
+
+        actions.appendChild(openBtn);
+
+        card.appendChild(header);
+        card.appendChild(actions);
+
+        list.appendChild(card);
+      });
+
+      root.appendChild(top);
+      root.appendChild(listTitle);
+      root.appendChild(list);
+    }
+
+    // ===== コード追加モーダル =====
+    function openCodeModal() {
+      const backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop';
+
+      const modal = document.createElement('div');
+      modal.className = 'modal';
+
+      const header = document.createElement('div');
+      header.className = 'modal-header';
+
+      const title = document.createElement('div');
+      title.className = 'modal-title';
+      title.textContent = 'HTML/CSS/JSの追加';
+
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '閉じる';
+      closeBtn.onclick = () => document.body.removeChild(backdrop);
+
+      header.appendChild(title);
+      header.appendChild(closeBtn);
+
+      const body = document.createElement('div');
+      body.className = 'modal-body';
+
+      const left = document.createElement('div');
+      left.className = 'modal-left';
+
+      const tabs = document.createElement('div');
+      tabs.className = 'code-tabs';
+
+      ['html', 'css', 'js'].forEach(lang => {
+        const tab = document.createElement('div');
+        tab.className = 'code-tab' + (lang === 'html' ? ' active' : '');
+        tab.dataset.lang = lang;
+        tab.textContent = lang.toUpperCase();
+        tab.onclick = () => switchTab(lang, tabs);
+        tabs.appendChild(tab);
+      });
+
+      const clipboard = document.createElement('div');
+      clipboard.className = 'clipboard-actions';
+      const pasteBtn = document.createElement('button');
+      pasteBtn.textContent = 'クリップボードから貼り付け';
+      pasteBtn.onclick = async () => {
+        try {
+          const text = await navigator.clipboard.readText();
+          const editor = editors[currentTab];
+          if (editor) editor.setValue(editor.getValue() + text);
+        } catch (e) {
+          alert('クリップボードの読み取りに失敗しました。');
+        }
+      };
+      const copyBtn = document.createElement('button');
+      copyBtn.textContent = 'エディタ内容をコピー';
+      copyBtn.onclick = async () => {
+        try {
+          const editor = editors[currentTab];
+          if (editor) {
+            await navigator.clipboard.writeText(editor.getValue());
+          }
+        } catch (e) {
+          alert('クリップボードへのコピーに失敗しました。');
+        }
+      };
+      clipboard.appendChild(pasteBtn);
+      clipboard.appendChild(copyBtn);
+
+      const editorContainer = document.createElement('div');
+      editorContainer.id = 'editor-container';
+
+      left.appendChild(tabs);
+      left.appendChild(clipboard);
+      left.appendChild(editorContainer);
+
+      const right = document.createElement('div');
+      right.className = 'modal-right';
+
+      const nameLabel = document.createElement('div');
+      nameLabel.className = 'field-label';
+      nameLabel.textContent = 'サイト名';
+
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.placeholder = '例: My HTML Site';
+
+      const previewBtn = document.createElement('button');
+      previewBtn.textContent = 'プレビュー';
+      previewBtn.onclick = () => {
+        const html = editors.html ? editors.html.getValue() : '';
+        const css = editors.css ? editors.css.getValue() : '';
+        const js = editors.js ? editors.js.getValue() : '';
+        openCodeSite({ html, css, js });
+      };
+
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = '保存';
+      saveBtn.onclick = async () => {
+        const html = editors.html ? editors.html.getValue() : '';
+        const css = editors.css ? editors.css.getValue() : '';
+        const js = editors.js ? editors.js.getValue() : '';
+        const item = {
+          type: 'code',
+          name: nameInput.value || 'コードサイト',
+          data: { html, css, js }
+        };
+        const id = await addItem(item);
+        item.id = id;
+        items.push(item);
+        renderHome();
+        document.body.removeChild(backdrop);
+      };
+
+      right.appendChild(nameLabel);
+      right.appendChild(nameInput);
+      right.appendChild(previewBtn);
+      right.appendChild(saveBtn);
+
+      body.appendChild(left);
+      body.appendChild(right);
+
+      modal.appendChild(header);
+      modal.appendChild(body);
+      backdrop.appendChild(modal);
+      document.body.appendChild(backdrop);
+
+      // Monaco 初期化
+      if (monacoLoaded) {
+        initEditors(editorContainer);
+      } else {
+        require(['vs/editor/editor.main'], function () {
+          monacoLoaded = true;
+          initEditors(editorContainer);
+        });
+      }
+    }
+
+    function initEditors(container) {
+      container.innerHTML = '';
+      const htmlDiv = document.createElement('div');
+      const cssDiv = document.createElement('div');
+      const jsDiv = document.createElement('div');
+      htmlDiv.style.width = cssDiv.style.width = jsDiv.style.width = '100%';
+      htmlDiv.style.height = cssDiv.style.height = jsDiv.style.height = '100%';
+      cssDiv.style.display = 'none';
+      jsDiv.style.display = 'none';
+      container.appendChild(htmlDiv);
+      container.appendChild(cssDiv);
+      container.appendChild(jsDiv);
+
+      editors.html = monaco.editor.create(htmlDiv, {
+        value: '<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="UTF-8">\n  <title>My Site</title>\n</head>\n<body>\n  <h1>Hello</h1>\n</body>\n</html>',
+        language: 'html',
+        theme: 'vs-dark',
+        automaticLayout: true
+      });
+      editors.css = monaco.editor.create(cssDiv, {
+        value: 'body { font-family: system-ui; }',
+        language: 'css',
+        theme: 'vs-dark',
+        automaticLayout: true
+      });
+      editors.js = monaco.editor.create(jsDiv, {
+        value: 'console.log("Hello from JS");',
+        language: 'javascript',
+        theme: 'vs-dark',
+        automaticLayout: true
+      });
+    }
+
+    function switchTab(lang, tabsContainer) {
+      currentTab = lang;
+      Array.from(tabsContainer.children).forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.lang === lang);
+      });
+      const container = document.getElementById('editor-container');
+      const [htmlDiv, cssDiv, jsDiv] = container.children;
+      htmlDiv.style.display = lang === 'html' ? 'block' : 'none';
+      cssDiv.style.display = lang === 'css' ? 'block' : 'none';
+      jsDiv.style.display = lang === 'js' ? 'block' : 'none';
+      editors[lang].layout();
+    }
+
+    // ===== フォルダアップロード =====
+    function triggerFolderUpload() {
+      const input = document.getElementById('folder-input');
+      input.value = '';
+      input.onchange = async (e) => {
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+
+        // パスのみ保存
+        const paths = files.map(f => f.webkitRelativePath || f.name);
+
+        // index.html を探して読み込む
+        const indexFile = files.find(f => /index\.html?$/i.test(f.name));
+        let indexContent = '';
+        if (indexFile) {
+          indexContent = await readFileText(indexFile);
+        }
+
+        const name = prompt('フォルダサイトの名前を入力してください', 'フォルダサイト') || 'フォルダサイト';
+        const item = {
+          type: 'folder',
+          name,
+          data: {
+            paths, // IndexedDBにはパスのみ
+            // indexContent はメモリのみ。再読み込みすると失われるが仕様に合わせてパスだけ保存。
+          }
+        };
+        const id = await addItem(item);
+        item.id = id;
+        items.push(item);
+        renderHome();
+
+        if (indexContent) {
+          openFolderSite(indexContent);
+        } else {
+          alert('index.html が見つからなかったため、プレビューできませんでした。');
+        }
+      };
+      input.click();
+    }
+
+    function readFileText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = (e) => reject(e);
+        reader.readAsText(file);
+      });
+    }
+
+    // ===== アイテムを開く =====
+    async function openItem(item) {
+      if (item.type === 'code') {
+        openCodeSite(item.data);
+      } else if (item.type === 'folder') {
+        // IndexedDBにはパスのみ保存しているため、
+        // 再読み込み後はフォルダ内容を自動で再取得することはできません。
+        alert('フォルダサイトはパスのみ保存しているため、再読み込み後は再アップロードが必要です。');
+      }
+    }
+
+    // ===== サイト表示 (DOM書き換え) =====
+    function openCodeSite(data) {
+      const { html, css, js } = data;
+      const siteView = document.getElementById('site-view');
+      const home = document.getElementById('home');
+
+      home.style.display = 'none';
+      siteView.style.display = 'block';
+      document.getElementById('esc-hint').style.display = 'block';
+
+      // DOMを書き換える: bodyの中身をサイト用に差し替え
+      siteView.innerHTML = '';
+
+      // HTMLをパースしてbody部分を抽出する簡易処理
+      let bodyContent = html;
+      const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (bodyMatch) {
+        bodyContent = bodyMatch[1];
+      }
+
+      const styleTag = document.createElement('style');
+      styleTag.textContent = css || '';
+      siteView.appendChild(styleTag);
+
+      const contentWrapper = document.createElement('div');
+      contentWrapper.innerHTML = bodyContent;
+      siteView.appendChild(contentWrapper);
+
+      if (js && js.trim()) {
+        const scriptTag = document.createElement('script');
+        scriptTag.textContent = js;
+        siteView.appendChild(scriptTag);
+      }
+    }
+
+    function openFolderSite(indexContent) {
+      const siteView = document.getElementById('site-view');
+      const home = document.getElementById('home');
+
+      home.style.display = 'none';
+      siteView.style.display = 'block';
+      document.getElementById('esc-hint').style.display = 'block';
+
+      siteView.innerHTML = '';
+
+      let bodyContent = indexContent;
+      const bodyMatch = indexContent.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (bodyMatch) {
+        bodyContent = bodyMatch[1];
+      }
+
+      const contentWrapper = document.createElement('div');
+      contentWrapper.innerHTML = bodyContent;
+      siteView.appendChild(contentWrapper);
+    }
+
+    // ===== ホームに戻る (DOMリセット) =====
+    function showHome() {
+      renderHome();
+    }
+  </script>
+</body>
+</html>
